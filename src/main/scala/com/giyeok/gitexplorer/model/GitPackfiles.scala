@@ -1,7 +1,10 @@
 package com.giyeok.gitexplorer.model
 
+import scala.Array.canBuildFrom
+import scala.Option.option2Iterable
+
 import com.giyeok.dexdio.dexreader.EndianRandomAccessFile
-import java.util.zip.Inflater
+import com.giyeok.gitexplorer.Util.BitOperableInt
 
 trait GitPackfiles {
     this: GitRepository =>
@@ -117,6 +120,9 @@ trait GitPackfiles {
                 diffOffset(orderedOffsets)
                 Map(mymap.toList: _*)
             }
+            val objectNameFromOffset = {
+                (offsets4 map { realOffset _ } zip objectNames).toMap
+            }
 
             def findOffsetFor(id: GitId): Option[Long] = {
                 def binarySearch(left: Int, right: Int): Option[Int] = {
@@ -154,6 +160,7 @@ trait GitPackfiles {
                 case None => None
             }
         }
+
         def readFromOffset(pack: EndianRandomAccessFile, offset: Long, id: GitId): Option[GitObject] = {
             pack.seek(offset)
             var read = pack.readByte()
@@ -192,44 +199,51 @@ trait GitPackfiles {
 					};
                  * 
                  */
+                def readAndInflate(size: Int) = {
+                    val raw = pack.readLength(size.toInt)
+                    GitRepository.inflate(raw)
+                }
                 objectType match {
                     case 0x1 =>
                         // raw commit
                         println(s"$id commit $size $sizeInPack $offset")
-                        // Some(GitCommit(id, GitRepository.inflate(raw)))
-                        Some(GitAbstractObject(id, objectType))
+                        Some(GitCommit(id, readAndInflate(sizeInPack.toInt)))
                     case 0x2 =>
                         // tree
                         println(s"$id tree   $size $sizeInPack $offset")
-                        Some(GitAbstractObject(id, objectType))
+                        Some(GitTree(id, readAndInflate(sizeInPack.toInt)))
                     case 0x3 =>
                         // blob
                         println(s"$id blob   $size $sizeInPack $offset")
-                        Some(GitAbstractObject(id, objectType))
+                        Some(GitBlob(id, readAndInflate(sizeInPack.toInt)))
                     case 0x4 =>
                         // tag
                         println(s"$id tag    $size $sizeInPack $offset")
-                        Some(GitAbstractObject(id, objectType))
+                        Some(GitTag(id, readAndInflate(sizeInPack.toInt)))
                     case 0x6 =>
                         // ofs_delta
-                        val negOffset = {
-                            read = pack.readByte()
+                        val (negOffset, offsetLen) = {
+                            var read = pack.readByte()
                             var value = read & 0x7f
                             var aug = 0
-                            while ((read & 0x80) != 0) {
+                            var len = 1
+                            while (read &? 0x80) {
                                 read = pack.readByte()
                                 value = (value << 7) | (read & 0x7f)
                                 aug = (aug << 7) | (1 << 7)
+                                len += 1
                             }
-                            value + aug
+                            (value + aug, len)
                         }
                         val originalOffset = offset - negOffset
-                        println(s"$id delta  $size $sizeInPack $offset ? ${offset.toHexString} $negOffset $originalOffset ${idx.sizeFromOffset.get(originalOffset)}")
-                        Some(GitAbstractObject(id, objectType))
+                        val inflated = readAndInflate(sizeInPack.toInt - offsetLen)
+                        val original = idx.objectNameFromOffset.getOrElse(originalOffset, { throw InvalidFormat("wrong ofs_delta offset") })
+                        println(s"$id delta  $size $sizeInPack $offset \\ $original")
+                        Some(GitDelta(id, inflated, original))
                     case t =>
                         // unknown?
                         println(s"$id unknown $objectType $size $sizeInPack $offset")
-                        Some(GitAbstractObject(id, objectType))
+                        Some(GitUnknown(id, objectType))
                 }
             } catch {
                 case x: Throwable =>
@@ -272,7 +286,7 @@ object PackfileTester {
         val packfile = new repo.GitPackfile("samples/my/.git/objects/pack/pack-7f3a02f7e5046988a88c86e37fcf7de5816f73f4")
         val all = packfile.allObjects
         println(all flatMap {
-            case repo.GitAbstractObject(id, objType, _) => Some(objType)
+            case repo.GitUnknown(id, objType, _) => Some(objType)
             case _ => None
         } toSet)
     }

@@ -9,7 +9,7 @@ import java.util.zip.Inflater
 class GitRepository extends GitObjects with GitPackfiles {
     case class InvalidFormat(msg: String) extends Exception
 
-    case class GitSHA1(sha1: Seq[Byte]) extends Ordered[GitSHA1] {
+    class GitSHA1(val sha1: Seq[Byte]) extends Ordered[GitSHA1] {
         def this(sha1: String) = this(GitSHA1.arrayFromString(sha1))
 
         assert(sha1.length == 20)

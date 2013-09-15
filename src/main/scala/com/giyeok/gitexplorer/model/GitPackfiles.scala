@@ -150,6 +150,8 @@ trait GitPackfiles {
             }
         }
 
+        case class GitUnknown(id: GitId, objType: Int, actualContent: Array[Byte] = new Array[Byte](0)) extends GitVirtualObject
+
         case class GitDelta(id: GitId, original: GitId, delta: Array[Byte]) extends GitVirtualObject {
             // NOTE Currently, assumes pack version 3
 
@@ -264,7 +266,7 @@ trait GitPackfiles {
                  */
                 def readAndInflate(size: Int) = {
                     val raw = pack.readLength(size.toInt)
-                    GitRepository.inflate(raw)
+                    inflate(raw)
                 }
                 objectType match {
                     case 0x1 =>
@@ -388,11 +390,14 @@ trait GitPackfiles {
                 case x: GitObject => x
             }
 
-            objects map {
+            objects flatMap {
                 case (id: GitId, delta: GitDelta) =>
                     val root = rootOf(delta)
-                    (id, GitObject.fromTypes(id, root.objectType, () => delta.content))
-                case (id: GitId, o: GitObject) => (id, o)
+                    Some(id, GitObject.fromTypes(id, root.objectType, () => delta.content))
+                case (id: GitId, GitUnknown(_, objType, _)) =>
+                    println(s"Unknown packfile object type: $id $objType")
+                    None
+                case (id: GitId, o: GitObject) => Some(id, o)
             }
         }
 
@@ -407,9 +412,5 @@ object PackfileTester {
         println(s"Start loading ${packfile.idxpath}")
         val all = packfile.allObjects
         println(s"${all.size} objects")
-        println(all flatMap {
-            case (_, repo.GitUnknown(id, objType, _)) => Some(objType)
-            case _ => None
-        } toSet)
     }
 }

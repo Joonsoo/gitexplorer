@@ -77,7 +77,7 @@ trait GitObjects {
     object GitObject {
         type Types = Types.Value
         object Types extends Enumeration {
-            val BLOB, TREE, COMMIT, TAG, UNKNOWN = Value
+            val BLOB, TREE, COMMIT, TAG = Value
         }
 
         def fromTypes(id: GitId, objType: Types, _actualContent: () => Array[Byte]) = {
@@ -206,8 +206,5 @@ trait GitObjects {
 
             (objId, objType, tagName, tagger, lines.pointer)
         }
-    }
-    case class GitUnknown(id: GitId, objType: Int, actualContent: Array[Byte] = new Array[Byte](0)) extends GitObject {
-        val objectType = GitObject.Types.UNKNOWN
     }
 }

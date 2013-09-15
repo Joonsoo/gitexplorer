@@ -19,6 +19,8 @@ class GitRepository extends GitObjects with GitPackfiles {
             case _ => false
         }
 
+        override def hashCode = sha1.hashCode
+
         override def compare(other: GitSHA1): Int = {
             // NOTE Is there an API to compare two seqs?
             (sha1 zip other.sha1).foldLeft(0)({
@@ -39,6 +41,8 @@ class GitRepository extends GitObjects with GitPackfiles {
         }
     }
     object GitSHA1 {
+        def apply(sha1: Seq[Byte]) = new GitSHA1(sha1)
+        def apply(sha1: String) = new GitSHA1(sha1)
         def arrayFromString(s: String): Seq[Byte] = {
             val ss = ((1 to (40 - s.length)) map { _ => "0" } mkString) + s
             assert(ss.length == 40)

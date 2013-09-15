@@ -7,5 +7,8 @@ object Util {
     implicit class UnsignedByte(b: Byte) {
         def toUB = b.toInt & 0xff
     }
+    implicit class ToContentString(a: Array[Byte]) {
+        def toContent = new String(a map { _.toChar })
+    }
 
 }

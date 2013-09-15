@@ -1,9 +1,6 @@
 package com.giyeok.gitexplorer.model
 
-import scala.Array.canBuildFrom
-import com.giyeok.gitexplorer.Util.BitOperableInt
-import com.giyeok.gitexplorer.Util.UnsignedByte
-import scala.collection.AbstractIterator
+import com.giyeok.gitexplorer.Util._
 
 trait GitObjects {
     this: GitRepository =>
@@ -64,31 +61,39 @@ trait GitObjects {
     }
 
     trait GitVirtualObject {
+        val id: GitId
+
+        lazy val content: Array[Byte] = actualContent
+
+        protected def actualContent: Array[Byte]
+
         // TODO make it abstract and implement it on inherited classes
         def verify: Boolean = true
     }
 
     sealed abstract class GitObject extends GitVirtualObject {
-        val id: GitId
-        lazy val content: Array[Byte] = actualContent
-
-        protected def actualContent: Array[Byte]
+        val objectType: GitObject.Types
     }
     object GitObject {
-        def fromPackfile(pack: GitPackfile, id: GitId, objType: Int, raw: Array[Byte]): GitObject = {
-            if (objType == 1) {
-                val content = GitRepository.inflate(raw)
-                println(s"== $id type: ${objType.toHexString} ==========")
-                println(new String(content map { _.toChar }))
-                println("====================================")
-            } else {
-                println(s"Raw: ${new String(raw map { _.toChar })}")
+        type Types = Types.Value
+        object Types extends Enumeration {
+            val BLOB, TREE, COMMIT, TAG, UNKNOWN = Value
+        }
+
+        def fromTypes(id: GitId, objType: Types, _actualContent: () => Array[Byte]) = {
+            import Types._
+            objType match {
+                case BLOB => new GitBlob(id) { def actualContent = _actualContent() }
+                case TREE => new GitTree(id) { def actualContent = _actualContent() }
+                case COMMIT => new GitCommit(id) { def actualContent = _actualContent() }
+                case TAG => new GitTag(id) { def actualContent = _actualContent() }
             }
-            new GitTree(id, new Array[Byte](0))
         }
     }
 
-    class GitTree(val id: GitId, val actualContent: Array[Byte]) extends GitObject {
+    abstract class GitTree(val id: GitId) extends GitObject {
+        val objectType = GitObject.Types.TREE
+
         case class TreeEntry(octalMode: String, name: String, objId: GitId) {
             def this(title: String, objId: GitId) = this(title.substring(0, title.indexOf(' ')), title.substring(title.indexOf(' ') + 1), objId)
         }
@@ -105,7 +110,7 @@ trait GitObjects {
                 def nextSHA1 = {
                     val sha1 = content slice (pointer, pointer + 20)
                     pointer += 20
-                    new GitSHA1(sha1)
+                    GitSHA1(sha1)
                 }
             }
             var entries = List[TreeEntry]()
@@ -117,11 +122,15 @@ trait GitObjects {
             entries.reverse
         }
     }
-    class GitBlob(val id: GitId, val actualContent: Array[Byte]) extends GitObject
-    class GitCommit(val id: GitId, protected val actualContent: Array[Byte]) extends GitObject {
-        println(s"=========== commit $id =============")
-        println(new String(content map { _.toChar }))
-        println(tree, parents, author, committer, new String(content drop messageFrom map { _.toChar }))
+    abstract class GitBlob(val id: GitId) extends GitObject {
+        val objectType = GitObject.Types.BLOB
+    }
+    abstract class GitCommit(val id: GitId) extends GitObject {
+        val objectType = GitObject.Types.COMMIT
+
+        // println(s"=========== commit $id =============")
+        // println(new String(content map { _.toChar }))
+        // println(tree, parents, author, committer, new String(content drop messageFrom map { _.toChar }))
 
         lazy val (tree: GitId, parents: List[GitId], author: Option[GitUser], committer: Option[GitUser], messageFrom: Int) = retrieveInfo
 
@@ -130,13 +139,13 @@ trait GitObjects {
 
             val treePattern = "^tree ([0-9a-f]{40})$".r
             val tree = lines.next match {
-                case treePattern(treeId) => new GitSHA1(treeId)
+                case treePattern(treeId) => GitSHA1(treeId)
                 case _ => throw InvalidFormat("Invalid commit content")
             }
 
             val parentPattern = "^parent ([0-9a-f]{40})$".r
             val parents = (lines processWhile {
-                case parentPattern(parentId) => Some(new GitSHA1(parentId))
+                case parentPattern(parentId) => Some(GitSHA1(parentId))
                 case _ => None
             }).toList
 
@@ -162,10 +171,12 @@ trait GitObjects {
             }
         }
     }
-    class GitTag(val id: GitId, val actualContent: Array[Byte]) extends GitObject {
-        println(s"========== tag $id ============")
-        println(new String(content map { _.toChar }))
-        println(objId, objType, tagName, tagger, new String(content drop messageFrom map { _.toChar }))
+    abstract class GitTag(val id: GitId) extends GitObject {
+        val objectType = GitObject.Types.TAG
+
+        // println(s"========== tag $id ============")
+        // println(new String(content map { _.toChar }))
+        // println(objId, objType, tagName, tagger, new String(content drop messageFrom map { _.toChar }))
 
         lazy val (objId: GitId, objType: String, tagName: String, tagger: Option[GitUser], messageFrom: Int) = retrieveInfo
 
@@ -174,7 +185,7 @@ trait GitObjects {
 
             val objectPattern = "^object ([0-9a-f]{40})$".r
             val objId = lines.next match {
-                case objectPattern(objId) => new GitSHA1(objId)
+                case objectPattern(objId) => GitSHA1(objId)
                 case _ => throw InvalidFormat("Invalid tag content - object?")
             }
 
@@ -196,5 +207,7 @@ trait GitObjects {
             (objId, objType, tagName, tagger, lines.pointer)
         }
     }
-    case class GitUnknown(id: GitId, objType: Int, actualContent: Array[Byte] = new Array[Byte](0)) extends GitObject
+    case class GitUnknown(id: GitId, objType: Int, actualContent: Array[Byte] = new Array[Byte](0)) extends GitObject {
+        val objectType = GitObject.Types.UNKNOWN
+    }
 }

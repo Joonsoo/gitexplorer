@@ -1,11 +1,7 @@
 package com.giyeok.gitexplorer.model
 
-import scala.Array.canBuildFrom
-import scala.Option.option2Iterable
-
 import com.giyeok.dexdio.dexreader.EndianRandomAccessFile
-import com.giyeok.gitexplorer.Util.BitOperableInt
-import com.giyeok.gitexplorer.Util.UnsignedByte
+import com.giyeok.gitexplorer.Util._
 
 trait GitPackfiles {
     this: GitRepository =>
@@ -55,7 +51,7 @@ trait GitPackfiles {
                         // println(fanout)
 
                         val objectNames = (0 until objectsCount) map { _ =>
-                            new GitSHA1(idx.readLength(20))
+                            GitSHA1(idx.readLength(20))
                         }
                         // objectNames takeRight 100 foreach { x => println(x.string) }
 
@@ -68,9 +64,9 @@ trait GitPackfiles {
                         val eights = offsets4 filter { x => (x & 0x10000000) != 0 }
                         val offsets8 = (0 until eights.length) map { _ => idx.readLong() }
 
-                        val packSHA1 = new GitSHA1(idx.readLength(20))
+                        val packSHA1 = GitSHA1(idx.readLength(20))
 
-                        val idxSHA1 = new GitSHA1(idx.readLength(20))
+                        val idxSHA1 = GitSHA1(idx.readLength(20))
 
                         new IdxFile(objectsCount, fanout, objectNames, Some(crc32), offsets4, offsets8, pack.length() - 20)
                     case _ =>
@@ -154,13 +150,13 @@ trait GitPackfiles {
             }
         }
 
-        class GitDelta(val id: GitId, val actualContent: Array[Byte], original: GitId) extends GitVirtualObject {
-            lazy val content = actualContent
-
+        case class GitDelta(id: GitId, original: GitId, delta: Array[Byte]) extends GitVirtualObject {
             // NOTE Currently, assumes pack version 3
 
             abstract class DeltaOp
-            case class DeltaInsert(content: Array[Byte]) extends DeltaOp
+            case class DeltaInsert(content: Array[Byte]) extends DeltaOp {
+                override def toString = s"DeltaInsert(${content.toContent})"
+            }
             case class DeltaCopy(offset: Long, size: Int) extends DeltaOp
 
             lazy val (baseObjectLength, resultObjectLength, deltaOps) = {
@@ -171,7 +167,7 @@ trait GitPackfiles {
                     last
                 }
                 def last = {
-                    content(pointer - 1)
+                    delta(pointer - 1)
                 }
 
                 def readLittleEndian128Int = {
@@ -188,7 +184,7 @@ trait GitPackfiles {
 
                 // println(baseObjectLength, resultObjectLength)
                 var deltaOps = List[DeltaOp]()
-                while (pointer < content.length) {
+                while (pointer < delta.length) {
                     // println(s"opcode ${opcode.toBinaryString}")
                     deltaOps +:= (next.toUB match {
                         case 0 =>
@@ -208,7 +204,7 @@ trait GitPackfiles {
                             DeltaCopy(offset, size)
                         case opcode =>
                             // "insert"
-                            val inserted = content slice (pointer, pointer + opcode)
+                            val inserted = delta slice (pointer, pointer + opcode)
                             pointer += opcode
                             DeltaInsert(inserted)
                     })
@@ -216,13 +212,19 @@ trait GitPackfiles {
                 (baseObjectLength, resultObjectLength, deltaOps.reverse)
             }
 
-            def recovered: GitObject = {
-                // calculate its real value
-                GitUnknown(id, 0)
+            def actualContent: Array[Byte] = {
+                val source = getObject(original).getOrElse(throw InvalidFormat(s"Delta object refers to invalid object $original")).content.toSeq
+                val blocks = deltaOps flatMap {
+                    case DeltaCopy(offset, size) =>
+                        assert(offset < Integer.MAX_VALUE)
+                        source slice (offset.toInt, offset.toInt + size)
+                    case DeltaInsert(content) => content.toSeq
+                }
+                blocks.toArray
             }
         }
 
-        def readFromOffset(pack: EndianRandomAccessFile, offset: Long, id: GitId): Option[GitVirtualObject] = {
+        private def readFromOffset(pack: EndianRandomAccessFile, offset: Long, id: GitId): Option[GitVirtualObject] = {
             pack.seek(offset)
             var read = pack.readByte()
             val objectType = (read & 0x70) >> 4
@@ -268,19 +270,23 @@ trait GitPackfiles {
                     case 0x1 =>
                         // raw commit
                         // println(s"$id commit $size $sizeInPack $offset")
-                        Some(new GitCommit(id, readAndInflate(sizeInPack.toInt)))
+                        val _content = readAndInflate(sizeInPack.toInt)
+                        Some(new GitCommit(id) { val actualContent = _content })
                     case 0x2 =>
                         // tree
                         // println(s"$id tree   $size $sizeInPack $offset")
-                        Some(new GitTree(id, readAndInflate(sizeInPack.toInt)))
+                        val _content = readAndInflate(sizeInPack.toInt)
+                        Some(new GitTree(id) { val actualContent = _content })
                     case 0x3 =>
                         // blob
                         // println(s"$id blob   $size $sizeInPack $offset")
-                        Some(new GitBlob(id, readAndInflate(sizeInPack.toInt)))
+                        val _content = readAndInflate(sizeInPack.toInt)
+                        Some(new GitBlob(id) { val actualContent = _content })
                     case 0x4 =>
                         // tag
                         // println(s"$id tag    $size $sizeInPack $offset")
-                        Some(new GitTag(id, readAndInflate(sizeInPack.toInt)))
+                        val _content = readAndInflate(sizeInPack.toInt)
+                        Some(new GitTag(id) { val actualContent = _content })
                     case 0x6 =>
                         // ofs_delta
                         val (negOffset, offsetLen) = {
@@ -297,10 +303,10 @@ trait GitPackfiles {
                             (value + aug, len)
                         }
                         val originalOffset = offset - negOffset
-                        val inflated = readAndInflate(sizeInPack.toInt - offsetLen)
                         val original = idx.objectNameFromOffset.getOrElse(originalOffset, { throw InvalidFormat("wrong ofs_delta offset") })
+                        val inflated = readAndInflate(sizeInPack.toInt - offsetLen)
                         // println(s"$id delta  $size $sizeInPack $offset \\ $original")
-                        Some(new GitDelta(id, inflated, original))
+                        Some(new GitDelta(id, original, inflated))
                     case t =>
                         // unknown?
                         // println(s"$id unknown $objectType $size $sizeInPack $offset")
@@ -313,21 +319,39 @@ trait GitPackfiles {
             }
         }
 
-        def findObject(pack: EndianRandomAccessFile, id: GitId): Option[GitVirtualObject] = {
-            val offset = idx.findOffsetFor(id)
-            offset match {
-                case Some(offset) => readFromOffset(pack, offset, id)
-                case None => None
+        private val knownObjects = scala.collection.mutable.Map[GitId, GitVirtualObject]()
+        def registerObject(id: GitId, obj: GitVirtualObject): GitVirtualObject = {
+            knownObjects(id) = obj
+            obj
+        }
+
+        def getObject(pack: EndianRandomAccessFile, id: GitId): Option[GitVirtualObject] = {
+            (knownObjects get id) match {
+                case Some(obj) => Some(obj)
+                case None =>
+                    val offset = idx.findOffsetFor(id)
+                    offset match {
+                        case Some(offset) =>
+                            readFromOffset(pack, offset, id) match {
+                                case Some(obj) => Some(registerObject(id, obj))
+                                case None => None
+                            }
+                        case None => None
+                    }
             }
         }
 
-        def findObject(id: GitId): Option[GitVirtualObject] = {
-            var pack: EndianRandomAccessFile = null
-            try {
-                pack = new EndianRandomAccessFile(packpath, "r")
-                findObject(pack, id)
-            } finally {
-                if (pack == null) pack.close()
+        def getObject(id: GitId): Option[GitVirtualObject] = {
+            (knownObjects get id) match {
+                case Some(obj) => Some(obj)
+                case None =>
+                    var pack: EndianRandomAccessFile = null
+                    try {
+                        pack = new EndianRandomAccessFile(packpath, "r")
+                        getObject(pack, id)
+                    } finally {
+                        if (pack == null) pack.close()
+                    }
             }
         }
 
@@ -336,8 +360,10 @@ trait GitPackfiles {
             try {
                 pack = new EndianRandomAccessFile(packpath, "r")
                 val objs = (idx.objectNames zip idx.offsets4) flatMap {
-                    case (objName, offset) =>
-                        readFromOffset(pack, idx.realOffset(offset), objName)
+                    case (objId, _) if knownObjects contains objId =>
+                        Some(knownObjects(objId))
+                    case (objId, offset) =>
+                        readFromOffset(pack, idx.realOffset(offset), objId)
                 }
                 println(s"${objs.length - (objs count { _.isInstanceOf[GitDelta] })} non-delta objects")
                 objs
@@ -346,12 +372,31 @@ trait GitPackfiles {
             }
         }
 
-        lazy val allObjects = {
-            val allObjects = readAllObjects
-            allObjects
+        lazy val allObjects: Map[GitId, GitObject] = {
+            val objects = readAllObjects groupBy { _.id } map { case (key, value) => (key, value.head) ensuring value.length == 1 }
+
+            val roots = scala.collection.mutable.Map[GitId, GitObject]()
+            def rootOf(obj: GitVirtualObject): GitObject = obj match {
+                case GitDelta(id, original, _) =>
+                    roots.get(id) match {
+                        case Some(root) => root
+                        case None =>
+                            val root = rootOf(objects(original))
+                            roots(id) = root
+                            root
+                    }
+                case x: GitObject => x
+            }
+
+            objects map {
+                case (id: GitId, delta: GitDelta) =>
+                    val root = rootOf(delta)
+                    (id, GitObject.fromTypes(id, root.objectType, () => delta.content))
+                case (id: GitId, o: GitObject) => (id, o)
+            }
         }
 
-        def objectNames = idx.objectNames
+        def objectNames = idx.objectNames.toSet
     }
 }
 
@@ -361,9 +406,9 @@ object PackfileTester {
         val packfile = new repo.GitPackfile("samples/my/.git/objects/pack/pack-7f3a02f7e5046988a88c86e37fcf7de5816f73f4")
         println(s"Start loading ${packfile.idxpath}")
         val all = packfile.allObjects
-        println(s"${all.length} objects")
+        println(s"${all.size} objects")
         println(all flatMap {
-            case repo.GitUnknown(id, objType, _) => Some(objType)
+            case (_, repo.GitUnknown(id, objType, _)) => Some(objType)
             case _ => None
         } toSet)
     }

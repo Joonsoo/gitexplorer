@@ -273,22 +273,22 @@ trait GitPackfiles {
                         // raw commit
                         // println(s"$id commit $size $sizeInPack $offset")
                         val _content = readAndInflate(sizeInPack.toInt)
-                        Some(new GitCommit(id) { val actualContent = _content })
+                        Some(new GitCommitExisting(id, _content))
                     case 0x2 =>
                         // tree
                         // println(s"$id tree   $size $sizeInPack $offset")
                         val _content = readAndInflate(sizeInPack.toInt)
-                        Some(new GitTree(id) { val actualContent = _content })
+                        Some(new GitTreeExisting(id, _content))
                     case 0x3 =>
                         // blob
                         // println(s"$id blob   $size $sizeInPack $offset")
                         val _content = readAndInflate(sizeInPack.toInt)
-                        Some(new GitBlob(id) { val actualContent = _content })
+                        Some(new GitBlobExisting(id, _content))
                     case 0x4 =>
                         // tag
                         // println(s"$id tag    $size $sizeInPack $offset")
                         val _content = readAndInflate(sizeInPack.toInt)
-                        Some(new GitTag(id) { val actualContent = _content })
+                        Some(new GitTagExisting(id, _content))
                     case 0x6 =>
                         // ofs_delta
                         val (negOffset, offsetLen) = {

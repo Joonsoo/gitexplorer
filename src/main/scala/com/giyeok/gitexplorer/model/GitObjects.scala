@@ -12,53 +12,6 @@ trait GitObjects {
             GitUser(spec.substring(0, lt).trim, spec.substring(lt + 1, gt).trim, spec.substring(gt + 1).trim)
         }
     }
-    object SpaceSplittedString {
-        def unapply(string: String): Option[(String, String)] = {
-            val i = string.indexOf(' ')
-            if (i >= 0) Some(string.substring(0, i), string.substring(i + 1)) else None
-        }
-    }
-    class LineIterator(content: Array[Byte]) extends Iterator[String] {
-        self =>
-
-        private var _pointer = 0
-        private var _last = ""
-        private var lastConsumed = true
-
-        def pointer = _pointer
-        override def hasNext = _pointer < content.length
-        def last = _last
-        override def next() = {
-            // TODO improve performance
-            if (!lastConsumed) {
-                lastConsumed = true
-                last
-            } else {
-                val line = content drop pointer takeWhile (_ != '\n') map { _.toChar }
-                _pointer += line.length + 1
-                _last = new String(line)
-                last
-            }
-        }
-
-        def process[A](block: String => (Boolean, A)): A = {
-            val (consumed, result) = block(next)
-            lastConsumed = consumed
-            result
-        }
-        def processWhile[A](block: String => Option[A]): List[A] = {
-            var result = List[A]()
-            var continue = true
-            while (continue) {
-                block(next) match {
-                    case Some(x) => result +:= x
-                    case _ => continue = false
-                }
-            }
-            lastConsumed = false
-            result.reverse
-        }
-    }
 
     trait GitVirtualObject {
         val id: GitId
@@ -80,25 +33,55 @@ trait GitObjects {
             val BLOB, TREE, COMMIT, TAG = Value
         }
 
-        def fromTypes(id: GitId, objType: Types, _actualContent: () => Array[Byte]) = {
+        def fromTypes(id: GitId, objType: Types, actualContent: () => Array[Byte]) = {
             import Types._
             objType match {
-                case BLOB => new GitBlob(id) { def actualContent = _actualContent() }
-                case TREE => new GitTree(id) { def actualContent = _actualContent() }
-                case COMMIT => new GitCommit(id) { def actualContent = _actualContent() }
-                case TAG => new GitTag(id) { def actualContent = _actualContent() }
+                case BLOB => new GitBlobExisting(id, actualContent)
+                case TREE => new GitTreeExisting(id, actualContent)
+                case COMMIT => new GitCommitExisting(id, actualContent)
+                case TAG => new GitTagExisting(id, actualContent)
             }
         }
     }
 
-    abstract class GitTree(val id: GitId) extends GitObject {
-        val objectType = GitObject.Types.TREE
+    trait GitIdCalculator extends GitObject {
+        val objectType: GitObject.Types
 
-        case class TreeEntry(octalMode: String, name: String, objId: GitId) {
+        lazy val objectContent: Array[Byte] =
+            (objectType.toString.toLowerCase + " " + content.length + "\\0").getBytes() ++ content
+
+        lazy val id = {
+            // TODO implement this
+            new GitSHA1("")
+        }
+    }
+
+    abstract class GitBlob extends GitObject {
+        val objectType = GitObject.Types.BLOB
+    }
+    class GitBlobExisting(val id: GitId, _actualContent: () => Array[Byte]) extends GitBlob {
+        def this(id: GitId, _actualContent: Array[Byte]) = this(id, () => _actualContent)
+        def actualContent = _actualContent()
+    }
+    class GitBlobNew(_content: Array[Byte]) extends GitBlob with GitIdCalculator {
+        def actualContent = _content
+    }
+
+    object GitTree {
+        case class Entry(octalMode: String, name: String, objId: GitId) {
             def this(title: String, objId: GitId) = this(title.substring(0, title.indexOf(' ')), title.substring(title.indexOf(' ') + 1), objId)
         }
+    }
+    abstract class GitTree extends GitObject {
+        val objectType = GitObject.Types.TREE
 
-        lazy val entries: List[TreeEntry] = {
+        val entries: List[GitTree.Entry]
+    }
+    class GitTreeExisting(val id: GitId, _actualContent: () => Array[Byte]) extends GitTree {
+        def this(id: GitId, _actualContent: Array[Byte]) = this(id, () => _actualContent)
+        def actualContent = _actualContent()
+
+        lazy val entries: List[GitTree.Entry] = {
             val reader = new Object {
                 var pointer = 0
                 def hasNext = pointer < content.length
@@ -113,26 +96,40 @@ trait GitObjects {
                     GitSHA1(sha1)
                 }
             }
-            var entries = List[TreeEntry]()
+            var entries = List[GitTree.Entry]()
             while (reader hasNext) {
                 val title = reader.nextTitle
                 val sha1 = reader.nextSHA1
-                entries +:= new TreeEntry(title, sha1)
+                entries +:= new GitTree.Entry(title, sha1)
             }
             entries.reverse
         }
     }
-    abstract class GitBlob(val id: GitId) extends GitObject {
-        val objectType = GitObject.Types.BLOB
+    class GitTreeNew(val entries: List[GitTree.Entry]) extends GitTree with GitIdCalculator {
+        def actualContent = {
+            // TODO generate from entries
+            new Array[Byte](0)
+        }
     }
-    abstract class GitCommit(val id: GitId) extends GitObject {
+
+    abstract class GitCommit extends GitObject {
         val objectType = GitObject.Types.COMMIT
 
         // println(s"=========== commit $id =============")
         // println(new String(content map { _.toChar }))
         // println(tree, parents, author, committer, new String(content drop messageFrom map { _.toChar }))
+        val tree: GitId
+        val parents: List[GitId]
+        val author: Option[GitUser]
+        val committer: Option[GitUser]
+        val message: Array[Byte]
+    }
+    class GitCommitExisting(val id: GitId, _actualContent: () => Array[Byte]) extends GitCommit {
+        def this(id: GitId, _actualContent: Array[Byte]) = this(id, () => _actualContent)
+        def actualContent = _actualContent()
 
         lazy val (tree: GitId, parents: List[GitId], author: Option[GitUser], committer: Option[GitUser], messageFrom: Int) = retrieveInfo
+        lazy val message = content drop messageFrom
 
         private def retrieveInfo = {
             val lines = new LineIterator(content)
@@ -171,14 +168,30 @@ trait GitObjects {
             }
         }
     }
-    abstract class GitTag(val id: GitId) extends GitObject {
+    class GitCommitNew(val tree: GitId, val parents: List[GitId], val author: Option[GitUser], val committer: Option[GitUser],
+        val message: Array[Byte]) extends GitCommit with GitIdCalculator {
+
+        def actualContent = {
+            // TODO generate from data
+            new Array[Byte](0)
+        }
+    }
+
+    abstract class GitTag extends GitObject {
         val objectType = GitObject.Types.TAG
 
-        // println(s"========== tag $id ============")
-        // println(new String(content map { _.toChar }))
-        // println(objId, objType, tagName, tagger, new String(content drop messageFrom map { _.toChar }))
+        val objId: GitId
+        val objType: String
+        val tagName: String
+        val tagger: Option[GitUser]
+        val message: Array[Byte]
+    }
+    class GitTagExisting(val id: GitId, _actualContent: () => Array[Byte]) extends GitTag {
+        def this(id: GitId, _actualContent: Array[Byte]) = this(id, () => _actualContent)
+        def actualContent = _actualContent()
 
         lazy val (objId: GitId, objType: String, tagName: String, tagger: Option[GitUser], messageFrom: Int) = retrieveInfo
+        lazy val message = content drop messageFrom
 
         private def retrieveInfo = {
             val lines = new LineIterator(content)
@@ -205,6 +218,14 @@ trait GitObjects {
             }
 
             (objId, objType, tagName, tagger, lines.pointer)
+        }
+    }
+    class GitTagNew(val objId: GitId, val objType: String, val tagName: String, val tagger: Option[GitUser],
+        val message: Array[Byte]) extends GitTag with GitIdCalculator {
+
+        def actualContent = {
+            // TODO generate from data
+            new Array[Byte](0)
         }
     }
 }

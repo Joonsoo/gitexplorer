@@ -1,4 +1,4 @@
-package com.giyeok.dexdio.dexreader;
+package com.giyeok.commons.io;
 
 import java.io.DataInput;
 import java.io.File;

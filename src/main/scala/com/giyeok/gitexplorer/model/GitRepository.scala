@@ -4,41 +4,46 @@ import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
-import java.util.zip.Inflater
-import com.giyeok.gitexplorer.Util
 
-class GitRepository extends GitObjects with GitPackfiles with GitHash {
+import com.giyeok.gitexplorer.Util._
+
+class GitRepository(val path: String) extends GitObjects with GitPackfiles with GitHash {
     case class InvalidFormat(msg: String) extends Exception
 
     type GitId = GitSHA1
-}
 
-object GitRepository {
-    def loadFrom(path: String) = {
-        // load git repository at `path` and returns GitRepository
-        def readFile(f: File): Array[Byte] = {
-            val fos = new ByteArrayOutputStream(65535)
-            val bis = new BufferedInputStream(new FileInputStream(f))
-            val buf = new Array[Byte](1024)
-            Stream.continually(bis.read(buf))
-                .takeWhile(_ != -1)
-                .foreach(fos.write(buf, 0, _))
-            fos.toByteArray
-        }
-        def inflateFile(f: File) = {
-            Util.inflate(readFile(f))
-        }
+    abstract class GitObjectStore {
+        def hasObject(id: GitId): Boolean
+        def getObject(id: GitId): Option[GitObject]
 
-        val objects = new File(path, "objects")
-        objects.list foreach { subpath =>
-            if (subpath.length == 2) {
-                val subdirs = new File(objects, subpath)
-                subdirs.list foreach { obj =>
-                    val f = new File(subdirs, obj)
-                    val inflated = inflateFile(f)
-                    println(inflated.length, new String(inflated))
-                }
+        def allObjects: Map[GitId, GitObject]
+        def allObjectIds: Set[GitId]
+    }
+
+    // add Packfiles
+    private val packfiles: List[GitPackfile] = {
+        val packFolder = new File(path + "/objects/pack")
+        if (!packFolder.exists()) List()
+        else {
+            val packs = packFolder.list().toSet
+            val packIdx = packs groupBy { LastDotSplittedString(_)._2.toLowerCase } map {
+                case (ext, full) => (ext, full map { LastDotSplittedString(_)._1 })
             }
+            val commons = packIdx.getOrElse("pack", Set()) & packIdx.getOrElse("idx", Set())
+            (commons map { name => new GitPackfile(path + "/objects/pack/" + name) }).toList
+        }
+    }
+
+    protected val _objectStores = List[GitObjectStore](GitObjects) ++ packfiles
+
+    def allObjects = (_objectStores flatMap { _.allObjects }).toMap
+    def allObjectIds = (_objectStores flatMap { _.allObjectIds }).toSet
+    def getObject(id: GitId) = {
+        // NOTE (_objectStores foldLeft None) does not work.. it is understandable, but a little bit odd
+        // Wouldn't None[GitObject] be better?
+        (_objectStores foldLeft Option.empty[GitObject]) {
+            case (result @ Some(_), store) => result
+            case (None, store) => store.getObject(id)
         }
     }
 }

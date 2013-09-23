@@ -1,6 +1,11 @@
 package com.giyeok.gitexplorer
 
 import java.util.zip.Inflater
+import scala.util.matching.Regex
+import java.io.ByteArrayOutputStream
+import java.io.BufferedInputStream
+import java.io.File
+import java.io.FileInputStream
 
 object Util {
     implicit class BitOperableInt(i: Int) {
@@ -12,17 +17,32 @@ object Util {
     implicit class ToContentString(a: Array[Byte]) {
         def toContent = new String(a map { _.toChar })
     }
+    implicit class RegexMatchable(r: Regex) {
+        def matches(s: String) = !(r findAllIn s).isEmpty
+    }
 
+    object LastDotSplittedString {
+        def apply(string: String): (String, String) = {
+            val i = string.lastIndexOf('.')
+            if (i >= 0) (string.substring(0, i), string.substring(i + 1)) else (string, "")
+        }
+        def unapply(string: String): Option[(String, String)] = {
+            val i = string.lastIndexOf('.')
+            if (i >= 0) Some(string.substring(0, i), string.substring(i + 1)) else None
+        }
+    }
     object SpaceSplittedString {
         def unapply(string: String): Option[(String, String)] = {
             val i = string.indexOf(' ')
             if (i >= 0) Some(string.substring(0, i), string.substring(i + 1)) else None
         }
     }
-    object NullSplittedString {
-        def unapply(string: String): Option[(String, String)] = {
-            val i = string.indexOf('\0')
-            if (i >= 0) Some(string.substring(0, i), string.substring(i + 1)) else None
+    object NullSplittedByteArray {
+        def unapply(array: Array[Byte]): Option[(Array[Byte], Array[Byte])] = {
+            array.zipWithIndex.find(_._1 == 0) match {
+                case Some((_, i)) => Some(array take i, array drop (i + 1))
+                case _ => None
+            }
         }
     }
 
@@ -66,6 +86,16 @@ object Util {
             lastConsumed = false
             result.reverse
         }
+    }
+
+    def readFile(f: File): Array[Byte] = {
+        val fos = new ByteArrayOutputStream(65535)
+        val bis = new BufferedInputStream(new FileInputStream(f))
+        val buf = new Array[Byte](1024)
+        Stream.continually(bis.read(buf))
+            .takeWhile(_ != -1)
+            .foreach(fos.write(buf, 0, _))
+        fos.toByteArray
     }
 
     private val inflater = new Inflater()

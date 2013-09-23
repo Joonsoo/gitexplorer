@@ -1,11 +1,14 @@
 package com.giyeok.gitexplorer.model
 
 import com.giyeok.gitexplorer.Util._
+import java.io.File
 
 trait GitObjects {
     this: GitRepository =>
 
-    case class GitUser(name: String, email: String, date: String)
+    case class GitUser(name: String, email: String, date: String) {
+        override def toString = s"$name <$email>"
+    }
     object GitUser {
         def fromString(spec: String) = {
             val (lt, gt) = (spec.indexOf('<'), spec.lastIndexOf('>'))
@@ -31,6 +34,14 @@ trait GitObjects {
         type Types = Types.Value
         object Types extends Enumeration {
             val BLOB, TREE, COMMIT, TAG = Value
+            
+            def unapply(name: String): Option[Types.Value] = name.toLowerCase match {
+                case "blob" => Some(BLOB)
+                case "tree" => Some(TREE)
+                case "commit" => Some(COMMIT)
+                case "tag" => Some(TAG)
+                case _ => None
+            }
         }
 
         def fromTypes(id: GitId, objType: Types, actualContent: () => Array[Byte]) = {
@@ -40,6 +51,22 @@ trait GitObjects {
                 case TREE => new GitTreeExisting(id, actualContent)
                 case COMMIT => new GitCommitExisting(id, actualContent)
                 case TAG => new GitTagExisting(id, actualContent)
+            }
+        }
+
+        def fromFile(id: GitId, file: File): GitObject = {
+            import Types._
+            inflate(readFile(file)) match {
+                case NullSplittedByteArray(objType, content) =>
+                    // println(objType.length, objType.toContent, content.length)
+                    objType.toContent match {
+                        case SpaceSplittedString(Types(objType), length) if length.toInt == content.length =>
+                            GitObject.fromTypes(id, objType, () => content)
+                        case _ =>
+                            throw InvalidFormat(s"Invalid object file: $id")
+                    }
+                case _ =>
+                    throw InvalidFormat(s"Invalid object file: $id")
             }
         }
     }
@@ -53,6 +80,40 @@ trait GitObjects {
         lazy val id = {
             // TODO implement this
             new GitSHA1("")
+        }
+    }
+
+    object GitObjects extends GitObjectStore {
+        def hasObject(id: GitId): Boolean = {
+            allObjectIds contains id
+        }
+        def getObject(id: GitId): Option[GitObject] = {
+            if (allObjectIds contains id) {
+                _allObjects get id match {
+                    case Some(o) => Some(o)
+                    case None =>
+                        val ids = id.toString.splitAt(2)
+                        Some(GitObject.fromFile(id, new File(path, Seq("objects", ids._1, ids._2) mkString "/")))
+                }
+            } else None
+        }
+
+        lazy val allObjectIds = {
+            val objects = new File(path, "objects")
+            val prefix = "^[0-9a-f]{2}$".r
+            (objects.list flatMap {
+                case subpath if prefix matches subpath =>
+                    val subdirs = new File(objects, subpath)
+                    subdirs.list map { obj =>
+                        new GitSHA1(subpath + obj)
+                    }
+                case "pack" => List()
+                case "info" => List()
+            }).toSet
+        }
+        private val _allObjects = scala.collection.mutable.Map[GitId, GitObject]()
+        lazy val allObjects = {
+            (allObjectIds map { id => (id, getObject(id).get) }).toMap
         }
     }
 

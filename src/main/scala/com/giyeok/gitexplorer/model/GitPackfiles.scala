@@ -1,14 +1,15 @@
 package com.giyeok.gitexplorer.model
 
-import com.giyeok.dexdio.dexreader.EndianRandomAccessFile
+import com.giyeok.commons.io.EndianRandomAccessFile
 import com.giyeok.gitexplorer.Util._
 
 trait GitPackfiles {
     this: GitRepository =>
 
-    class GitPackfile(val idxpath: String, val packpath: String) {
+    class GitPackfile(val idxpath: String, val packpath: String) extends GitObjectStore {
         def this(path: String) = this(path + ".idx", path + ".pack")
 
+        // TODO Maybe make it to load on-demand (for small jobs)
         val idx = {
             var idx: EndianRandomAccessFile = null
             var pack: EndianRandomAccessFile = null
@@ -233,7 +234,7 @@ trait GitPackfiles {
             val size = {
                 var value = read & 0xf
                 var counter = 4
-                while ((read & 0x80) != 0) {
+                while (read &? 0x80) {
                     read = pack.readByte()
                     value = value | ((read & 0x7f) << counter)
                     counter += 7
@@ -343,7 +344,7 @@ trait GitPackfiles {
             }
         }
 
-        def getObject(id: GitId): Option[GitVirtualObject] = {
+        def getRawObject(id: GitId): Option[GitVirtualObject] = {
             (knownObjects get id) match {
                 case Some(obj) => Some(obj)
                 case None =>
@@ -357,6 +358,20 @@ trait GitPackfiles {
             }
         }
 
+        private def getActualObject(id: GitId): GitObject = {
+            // TODO improve performance
+            allObjects(id)
+        }
+
+        def hasObject(id: GitId): Boolean = {
+            // TODO improve performance
+            getObject(id).isDefined
+        }
+
+        def getObject(id: GitId): Option[GitObject] = {
+            Some(getActualObject(id))
+        }
+
         private def readAllObjects = {
             var pack: EndianRandomAccessFile = null
             try {
@@ -367,7 +382,7 @@ trait GitPackfiles {
                     case (objId, offset) =>
                         readFromOffset(pack, idx.realOffset(offset), objId)
                 }
-                println(s"${objs.length - (objs count { _.isInstanceOf[GitDelta] })} non-delta objects")
+                // println(s"${objs.length - (objs count { _.isInstanceOf[GitDelta] })} non-delta objects")
                 objs
             } finally {
                 if (pack == null) pack.close()
@@ -401,14 +416,14 @@ trait GitPackfiles {
             }
         }
 
-        def objectNames = idx.objectNames.toSet
+        def allObjectIds = idx.objectNames.toSet
     }
 }
 
 object PackfileTester {
     def main(args: Array[String]): Unit = {
-        val repo = new GitRepository
-        val packfile = new repo.GitPackfile("samples/my/.git/objects/pack/pack-7f3a02f7e5046988a88c86e37fcf7de5816f73f4")
+        val repo = new GitRepository("samples/git/.git")
+        val packfile = new repo.GitPackfile("samples/git/.git/objects/pack/pack-144a2409b5481eff97e37a82cc508f347198e4cc")
         println(s"Start loading ${packfile.idxpath}")
         val all = packfile.allObjects
         println(s"${all.size} objects")

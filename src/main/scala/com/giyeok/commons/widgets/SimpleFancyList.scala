@@ -24,7 +24,7 @@ class SimpleFancyList(parent: Composite, style: Int, defaultData: SimpleFancyLis
     import SimpleFancyList._
 
     private abstract class ItemLocator {
-        val item: Item
+        val item: NonRoot
 
         def left: Int
         def top: Int
@@ -42,22 +42,22 @@ class SimpleFancyList(parent: Composite, style: Int, defaultData: SimpleFancyLis
             if (isVisible(widgetHeight)) {
                 gc.setClipping(0, clippingTop, widgetWidth, clippingBottom - clippingTop)
                 item match {
-                    case Root(children) =>
                     case Category(_, title, _, _) =>
                         gc.setFont(parentFont)
-                        gc.drawText(title, left, top)
+                        gc.drawText(title, left, top, true)
                     case Leaf(_, name) =>
                         gc.setFont(leafFont)
-                        gc.drawText(name, left, top)
+                        gc.drawText(name, left, top, true)
                 }
             }
         }
     }
-    private case class ItemLocation(item: Item, left: Int, top: Int, clippingTop: Int, clippingBottom: Int) extends ItemLocator {
-        def this(item: Item, left: Int, top: Int) = this(item, left, top, top, item.height)
+    private case class ItemLocation(item: NonRoot, left: Int, top: Int, clippingTop: Int, clippingBottom: Int) extends ItemLocator {
+        def this(item: NonRoot, left: Int, top: Int) = this(item, left, top, top, item.height)
+        def withLeft(newLeft: Int) = ItemLocation(item, newLeft, top, clippingTop, clippingBottom)
         def mutable = new MutableItemLocator(item, left, top, clippingTop, clippingBottom)
     }
-    private class MutableItemLocator(val item: Item, var _left: Int, var _top: Int, var _clippingTop: Int, var _clippingBottom: Int) extends ItemLocator {
+    private class MutableItemLocator(val item: NonRoot, var _left: Int, var _top: Int, var _clippingTop: Int, var _clippingBottom: Int) extends ItemLocator {
         def left = _left
         def top = _top
         def clippingTop = _clippingTop
@@ -108,9 +108,18 @@ class SimpleFancyList(parent: Composite, style: Int, defaultData: SimpleFancyLis
     private val currentStatus = new ListStatus(defaultData)
 
     private var leftAnimationTime = 0
+    private var parents: Map[String, String] = makeParentMap(defaultData)
     private var finalLocations: Map[String, ItemLocation] = calculateLocations(currentData, currentStatus)
+    private var destLocations: Map[String, ItemLocation] = finalLocations
     private val currentLocations =
         scala.collection.mutable.Map[String, MutableItemLocator]((finalLocations.toList map { p => (p._1 -> p._2.mutable) }): _*)
+
+    private def makeParentMap(item: Item): Map[String, String] = item match {
+        case Root(children) => (children.foldLeft(Map[String, String]())((map, item) => map ++ makeParentMap(item)))
+        case Category(id, _, children, _) =>
+            Map((children map { _.id -> id }): _*) ++ (children.foldLeft(Map[String, String]())((map, item) => map ++ makeParentMap(item)))
+        case _: Leaf => Map()
+    }
 
     // returns (height, map of item -> locations)
     private def calculateChildrenLocations(children: Seq[NonRoot], status: ListStatus, left: Int, top: Int): (Int, Map[String, ItemLocation]) = {
@@ -123,14 +132,14 @@ class SimpleFancyList(parent: Composite, style: Int, defaultData: SimpleFancyLis
         item match {
             case Root(children) =>
                 calculateChildrenLocations(children, status, left, top)
-            case Category(id, _, children, _) =>
+            case item @ Category(id, _, children, _) =>
                 if (status.isExpanded(id)) {
                     val childrenLocations = calculateChildrenLocations(children, status, left + parentIndent, top + parentHeight)
                     (childrenLocations._1 + parentHeight, childrenLocations._2 + (id -> ItemLocation(item, left, top, top, top + parentHeight)))
                 } else {
                     (parentHeight, Map(id -> ItemLocation(item, left, top, top, top + parentHeight)))
                 }
-            case Leaf(id, _) =>
+            case item @ Leaf(id, _) =>
                 (leafHeight, Map(id -> ItemLocation(item, left, top, top, top + leafHeight)))
         }
     }
@@ -169,13 +178,28 @@ class SimpleFancyList(parent: Composite, style: Int, defaultData: SimpleFancyLis
                             }
                             if (currentStatus.isExpanded(id)) {
                                 currentStatus.collapse(id)
-                                finalLocations = calculateLocations(currentData, currentStatus) ++ calculateCollapsedChildrenLocationsOf(id)
+                                finalLocations = calculateLocations(currentData, currentStatus)
+                                destLocations = finalLocations ++ calculateCollapsedChildrenLocationsOf(id)
+                                val hidings = currentLocations.keySet -- destLocations.keySet
+                                hidings foreach { id =>
+                                    val curloc = currentLocations(id)
+                                    if (curloc.isVisible) {
+                                        def findShowingAncestorLocation(id: String, depth: Int = 0): (Int, ItemLocation) =
+                                            (finalLocations get id) match {
+                                                case Some(loc) => (depth, loc)
+                                                case None => findShowingAncestorLocation(parents(id), depth + 1)
+                                            }
+                                        val (dep, anc) = findShowingAncestorLocation(id)
+                                        val finloc = ItemLocation(curloc.item, anc.left + parentIndent * dep, anc.top, anc.bottom, anc.clippingBottom)
+                                        destLocations += (id -> finloc)
+                                    }
+                                }
                             } else {
                                 currentStatus.expand(id)
-                                val nextLocations = calculateLocations(currentData, currentStatus)
-                                val itemLocation = nextLocations(id)
+                                finalLocations = calculateLocations(currentData, currentStatus)
+                                val itemLocation = finalLocations(id)
                                 val afterItems =
-                                    for ((id, l) <- nextLocations if l.top > itemLocation.top)
+                                    for ((id, l) <- finalLocations if l.top > itemLocation.top)
                                         yield (id, ItemLocation(l.item, l.left, l.top, bottom, l.clippingBottom))
                                 for ((id, l) <- afterItems) {
                                     currentLocations get id match {
@@ -192,7 +216,7 @@ class SimpleFancyList(parent: Composite, style: Int, defaultData: SimpleFancyLis
                                     }
                                 }
                                 currentLocations ++= newCollapsedItems mapValues { _.mutable }
-                                finalLocations = nextLocations ++ afterItems
+                                destLocations = finalLocations ++ afterItems
                             }
                             Animation.start()
                         case _ => // ignore
@@ -218,9 +242,10 @@ class SimpleFancyList(parent: Composite, style: Int, defaultData: SimpleFancyLis
         var leftDuration: Int = 0
 
         def iterate(): Boolean = {
-            val hidings = currentLocations.keySet -- finalLocations.keySet
             if (leftDuration < iterationTime || leftDuration < 1) {
                 leftDuration = 0
+                val hidings = currentLocations.keySet -- finalLocations.keySet
+                println(finalLocations.keySet)
                 currentLocations --= hidings
                 finalLocations foreach { pair =>
                     val (id, finloc) = pair
@@ -238,10 +263,10 @@ class SimpleFancyList(parent: Composite, style: Int, defaultData: SimpleFancyLis
                 false
             } else {
                 def interpolation(cur: Int, fin: Int) = cur + (((fin - cur) * iterationTime) / leftDuration)
-                val showings = finalLocations.keySet -- currentLocations.keySet
-                val movings = currentLocations.keySet & finalLocations.keySet
+                // val showings = finalLocations.keySet -- currentLocations.keySet
+                val movings = currentLocations.keySet & destLocations.keySet
                 movings foreach { id =>
-                    val (cur, fin) = (currentLocations(id), finalLocations(id))
+                    val (cur, fin) = (currentLocations(id), destLocations(id))
                     cur._left = interpolation(cur._left, fin.left)
                     cur._top = interpolation(cur._top, fin.top)
                     cur._clippingTop = fin.clippingTop

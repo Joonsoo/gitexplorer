@@ -22,6 +22,8 @@ libraryDependencies += {
   "org.eclipse.swt" % artifact % "4.3"
 }
 
-libraryDependencies += {
-  "org.eclipse.draw2d" % "org.eclipse.draw2d" % "3.7.2"
-}
+libraryDependencies ++= Seq(
+  "org.eclipse.draw2d" % "org.eclipse.draw2d" % "3.9.0" from "http://download.eclipse.org/tools/gef/updates/releases/plugins/org.eclipse.draw2d_3.9.0.201308190730.jar",
+  "org.eclipse.zest" % "org.eclipse.zest.core" % "1.5.0" from "http://download.eclipse.org/tools/gef/updates/releases/plugins/org.eclipse.zest.core_1.5.0.201308190730.jar",
+  "org.eclipse.zest" % "org.eclipse.zest.layouts" % "1.1.0" from "http://download.eclipse.org/tools/gef/updates/releases/plugins/org.eclipse.zest.layouts_1.1.0.201308190730.jar"
+)

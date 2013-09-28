@@ -1,14 +1,13 @@
 package com.giyeok.gitexplorer.model
 
-import java.io.BufferedInputStream
-import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileInputStream
 
-import com.giyeok.gitexplorer.Util._
+import com.giyeok.gitexplorer.Util.LastDotSplittedString
 
 class GitRepository(val path: String) extends GitObjects with GitPackfiles with GitHash {
     case class InvalidFormat(msg: String) extends Exception
+
+    val root = new File(path)
 
     type GitId = GitSHA1
 
@@ -22,7 +21,7 @@ class GitRepository(val path: String) extends GitObjects with GitPackfiles with 
 
     // add Packfiles
     private val packfiles: List[GitPackfile] = {
-        val packFolder = new File(path + "/objects/pack")
+        val packFolder = new File(root, "/objects/pack")
         if (!packFolder.exists()) List()
         else {
             val packs = packFolder.list().toSet
@@ -45,5 +44,14 @@ class GitRepository(val path: String) extends GitObjects with GitPackfiles with 
             case (result @ Some(_), store) => result
             case (None, store) => store.getObject(id)
         }
+    }
+
+    def allCommits = allObjects flatMap {
+        case (_, commit: GitCommit) => Some(commit)
+        case _ => None
+    }
+    def allTags = allObjects flatMap {
+        case (_, tag: GitTag) => Some(tag)
+        case _ => None
     }
 }

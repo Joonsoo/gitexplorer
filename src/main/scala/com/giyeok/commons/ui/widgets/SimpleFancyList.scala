@@ -1,4 +1,4 @@
-package com.giyeok.commons.widgets
+package com.giyeok.commons.ui.widgets
 
 import org.eclipse.swt.events.PaintEvent
 import org.eclipse.swt.events.PaintListener

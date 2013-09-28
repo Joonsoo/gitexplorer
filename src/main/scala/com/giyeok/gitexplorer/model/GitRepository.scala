@@ -2,6 +2,8 @@ package com.giyeok.gitexplorer.model
 
 import java.io.File
 
+import scala.Option.option2Iterable
+
 import com.giyeok.gitexplorer.Util.LastDotSplittedString
 
 class GitRepository(val path: String) extends GitObjects with GitPackfiles with GitHash {
@@ -35,8 +37,8 @@ class GitRepository(val path: String) extends GitObjects with GitPackfiles with 
 
     protected val _objectStores = List[GitObjectStore](GitObjects) ++ packfiles
 
-    def allObjects = (_objectStores flatMap { _.allObjects }).toMap
-    def allObjectIds = (_objectStores flatMap { _.allObjectIds }).toSet
+    lazy val allObjects = (_objectStores flatMap { _.allObjects }).toMap
+    lazy val allObjectIds = (_objectStores flatMap { _.allObjectIds }).toSet
     def getObject(id: GitId) = {
         // NOTE (_objectStores foldLeft None) does not work.. it is understandable, but a little bit odd
         // Wouldn't None[GitObject] be better?
@@ -46,11 +48,11 @@ class GitRepository(val path: String) extends GitObjects with GitPackfiles with 
         }
     }
 
-    def allCommits = allObjects flatMap {
+    lazy val allCommits = allObjects flatMap {
         case (_, commit: GitCommit) => Some(commit)
         case _ => None
     }
-    def allTags = allObjects flatMap {
+    lazy val allTags = allObjects flatMap {
         case (_, tag: GitTag) => Some(tag)
         case _ => None
     }

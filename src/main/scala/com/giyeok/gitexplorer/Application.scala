@@ -14,7 +14,8 @@ import org.eclipse.swt.layout.FillLayout
 
 class Application(path: String) extends RepositoryPrinter {
     val repo = new GitRepository(path)
-    val allObjects = repo.allObjects
+
+    println(s"${repo.allCommits.size} commits")
 
     def startGUI() = {
         val display = new Display()

@@ -416,7 +416,7 @@ trait GitPackfiles {
             }
         }
 
-        def allObjectIds = idx.objectNames.toSet
+        lazy val allObjectIds = idx.objectNames.toSet
     }
 }
 

@@ -71,7 +71,7 @@ trait GitObjects {
         }
     }
 
-    trait GitIdCalculator extends GitObject {
+    sealed trait GitIdCalculator extends GitObject {
         val objectType: GitObject.Types
 
         lazy val objectContent: Array[Byte] =

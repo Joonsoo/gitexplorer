@@ -2,11 +2,10 @@ package com.giyeok.gitexplorer.model
 
 import java.io.File
 
-import scala.Option.option2Iterable
-
 import com.giyeok.gitexplorer.Util.LastDotSplittedString
+import com.giyeok.gitexplorer.ui.GitObjectViews
 
-class GitRepository(val path: String) extends GitObjects with GitPackfiles with GitHash {
+class GitRepository(val path: String) extends GitObjects with GitObjectViews with GitPackfiles with GitHash {
     case class InvalidFormat(msg: String) extends Exception
 
     val root = new File(path)

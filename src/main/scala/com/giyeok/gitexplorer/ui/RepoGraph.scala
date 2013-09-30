@@ -8,6 +8,8 @@ import org.eclipse.draw2d.FigureCanvas
 import org.eclipse.draw2d.IFigure
 import org.eclipse.draw2d.Label
 import org.eclipse.draw2d.LineBorder
+import org.eclipse.draw2d.MouseEvent
+import org.eclipse.draw2d.MouseListener
 import org.eclipse.draw2d.Panel
 import org.eclipse.draw2d.PolylineConnection
 import org.eclipse.draw2d.PolylineDecoration
@@ -26,7 +28,7 @@ import org.eclipse.swt.events.PaintListener
 import org.eclipse.swt.graphics.Font
 import org.eclipse.swt.widgets.Shell
 
-import com.giyeok.gitexplorer.Util._
+import com.giyeok.gitexplorer.Util.ToContentString
 import com.giyeok.gitexplorer.model.GitRepository
 
 class RepoGraph(val shell: Shell, val repo: GitRepository) {
@@ -40,13 +42,32 @@ class RepoGraph(val shell: Shell, val repo: GitRepository) {
     graph.nodes = new NodeList
     graph.edges = new EdgeList
 
+    var commitClickListener = List[(repo.GitCommit) => Unit]()
+
+    private var highlighted = Option.empty[IFigure]
+    val highlightedBkgColor = ColorConstants.green
+
     val commitFont = new Font(null, "Courier New", 20, SWT.NONE)
+    val commitBkgColor = ColorConstants.white
     val commitBorder = new LineBorder(ColorConstants.black, 1)
     val commitNodes = (repo.allCommits map { commit =>
         val fig = new Label(commit.id.string.substring(0, 8))
         fig.setFont(commitFont)
+        fig.setOpaque(true)
+        fig.setBackgroundColor(commitBkgColor)
         fig.setBorder(commitBorder)
         fig.setToolTip(new Label(commit.message.toContent.trim))
+        fig.addMouseListener(new MouseListener {
+            def mousePressed(e: MouseEvent) = {
+                if (highlighted.isDefined) highlighted.get.setBackgroundColor(commitBkgColor)
+                fig.setBackgroundColor(highlightedBkgColor)
+                highlighted = Some(fig)
+
+                commitClickListener foreach { _(commit) }
+            }
+            def mouseReleased(e: MouseEvent) = {}
+            def mouseDoubleClicked(e: MouseEvent) = {}
+        })
         val node = new Node(fig)
         (commit.id, (fig, node))
     }).toMap

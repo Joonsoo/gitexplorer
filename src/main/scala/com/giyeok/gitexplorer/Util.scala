@@ -37,6 +37,12 @@ object Util {
             if (i >= 0) Some(string.substring(0, i), string.substring(i + 1)) else None
         }
     }
+    object SlashSplittedString {
+        def unapply(string: String): Option[(String, String)] = {
+            val i = string.indexOf('/')
+            if (i >= 0) Some(string.substring(0, i), string.substring(i + 1)) else None
+        }
+    }
     object NullSplittedByteArray {
         def unapply(array: Array[Byte]): Option[(Array[Byte], Array[Byte])] = {
             array.zipWithIndex.find(_._1 == 0) match {

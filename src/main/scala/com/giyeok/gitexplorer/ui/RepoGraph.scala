@@ -42,7 +42,7 @@ class RepoGraph(val shell: Shell, val repo: GitRepository) {
     graph.nodes = new NodeList
     graph.edges = new EdgeList
 
-    var commitClickListener = List[(repo.GitCommit) => Unit]()
+    var objectClickListener = List[(repo.GitId) => Unit]()
 
     private var highlighted = Option.empty[IFigure]
     val highlightedBkgColor = ColorConstants.green
@@ -59,11 +59,7 @@ class RepoGraph(val shell: Shell, val repo: GitRepository) {
         fig.setToolTip(new Label(commit.message.toContent.trim))
         fig.addMouseListener(new MouseListener {
             def mousePressed(e: MouseEvent) = {
-                if (highlighted.isDefined) highlighted.get.setBackgroundColor(commitBkgColor)
-                fig.setBackgroundColor(highlightedBkgColor)
-                highlighted = Some(fig)
-
-                commitClickListener foreach { _(commit) }
+                nodeClicked(commit.id)
             }
             def mouseReleased(e: MouseEvent) = {}
             def mouseDoubleClicked(e: MouseEvent) = {}
@@ -71,6 +67,22 @@ class RepoGraph(val shell: Shell, val repo: GitRepository) {
         val node = new Node(fig)
         (commit.id, (fig, node))
     }).toMap
+
+    def highlightNode(id: repo.GitId): Unit = {
+        if (highlighted.isDefined) highlighted.get.setBackgroundColor(commitBkgColor)
+        commitNodes get id match {
+            case Some((fig, _)) =>
+                fig.setBackgroundColor(highlightedBkgColor)
+                highlighted = Some(fig)
+            case _ =>
+                highlighted = None
+        }
+    }
+
+    def nodeClicked(id: repo.GitId): Unit = {
+        highlightNode(id)
+        objectClickListener foreach { _(id) }
+    }
 
     val commitEdges = (repo.allCommits flatMap { commit =>
         def edgeOf(child: repo.GitId, parent: repo.GitId): Edge = {

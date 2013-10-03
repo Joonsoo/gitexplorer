@@ -5,7 +5,8 @@ import java.io.File
 import com.giyeok.gitexplorer.Util.LastDotSplittedString
 import com.giyeok.gitexplorer.ui.GitObjectViews
 
-class GitRepository(val path: String) extends GitObjects with GitObjectViews with GitPackfiles with GitHash {
+class GitRepository(val path: String)
+    extends GitObjects with GitObjectViews with GitPackfiles with GitRefs {
     case class InvalidFormat(msg: String) extends Exception
 
     val root = new File(path)
@@ -33,6 +34,8 @@ class GitRepository(val path: String) extends GitObjects with GitObjectViews wit
             (commons map { name => new GitPackfile(path + "/objects/pack/" + name) }).toList
         }
     }
+    // read refs
+    val refs = loadRefs
 
     protected val _objectStores = List[GitObjectStore](GitObjects) ++ packfiles
 

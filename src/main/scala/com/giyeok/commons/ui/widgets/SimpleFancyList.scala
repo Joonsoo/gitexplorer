@@ -98,10 +98,10 @@ class SimpleFancyList(parent: Composite, style: Int, defaultData: SimpleFancyLis
 
     private var scrollTop = 0
 
-    private var parentHeight = 20
+    private var parentHeight = 25
     private var parentIndent = 15
     private var parentFont = new Font(null, "", 15, SWT.NONE)
-    private var leafHeight = 20
+    private var leafHeight = 25
     private var leafFont = new Font(null, "", 15, SWT.NONE)
 
     private var currentData: Root = defaultData
@@ -160,6 +160,8 @@ class SimpleFancyList(parent: Composite, style: Int, defaultData: SimpleFancyLis
         }
     })
 
+    var leafClickedListener: (String) => Unit = { id => println(s"$id clicked") }
+
     addMouseListener(new MouseListener {
         def mouseUp(e: MouseEvent) = ()
         def mouseDoubleClick(e: MouseEvent) = ()
@@ -168,7 +170,6 @@ class SimpleFancyList(parent: Composite, style: Int, defaultData: SimpleFancyLis
                 case Some((id, item)) if finalLocations contains id =>
                     item.item match {
                         case Category(_, _, children, (_, collapsable)) if collapsable =>
-                            println(id)
                             val bottom = finalLocations(id).bottom
                             def calculateCollapsedChildrenLocationsOf(id: String) = {
                                 val (childrenHeight, childrenLocations) = calculateChildrenLocations(children, currentStatus, finalLocations(id).left + parentIndent, 0)
@@ -219,7 +220,8 @@ class SimpleFancyList(parent: Composite, style: Int, defaultData: SimpleFancyLis
                                 destLocations = finalLocations ++ afterItems
                             }
                             Animation.start()
-                        case _ => // ignore
+                        case Leaf(id, _) =>
+                            leafClickedListener(id)
                     }
                 case _ => // ignore
             }
@@ -245,7 +247,6 @@ class SimpleFancyList(parent: Composite, style: Int, defaultData: SimpleFancyLis
             if (leftDuration < iterationTime || leftDuration < 1) {
                 leftDuration = 0
                 val hidings = currentLocations.keySet -- finalLocations.keySet
-                println(finalLocations.keySet)
                 currentLocations --= hidings
                 finalLocations foreach { pair =>
                     val (id, finloc) = pair

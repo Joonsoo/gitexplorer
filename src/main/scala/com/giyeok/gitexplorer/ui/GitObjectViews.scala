@@ -75,7 +75,6 @@ trait GitObjectViews {
     class ContinuousTextDrawer(g: GC, x: Int, var y: Int) {
         def drawText(text: String) = {
             val extent = g.textExtent(text)
-            println(y + " " + text)
             g.drawText(text, x, y)
             val rect = new Rectangle(x, y, extent.x, extent.y)
             y += extent.y

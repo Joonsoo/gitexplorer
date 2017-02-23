@@ -3,7 +3,7 @@ name := "Git Explorer"
 
 version := "0.1"
 
-scalaVersion := "2.10.2"
+scalaVersion := "2.12.1"
 
 
 resolvers += "swt-repo" at "https://swt-repo.googlecode.com/svn/repo/"
@@ -22,6 +22,11 @@ libraryDependencies += {
   "org.eclipse.swt" % artifact % "4.3"
 }
 
-libraryDependencies ++= Seq(
-  "org.eclipse.draw2d" % "org.eclipse.draw2d" % "3.9.0" from "http://download.eclipse.org/tools/gef/updates/releases/plugins/org.eclipse.draw2d_3.9.0.201308190730.jar"
-)
+javaOptions in run := {
+    println(sys.props("os.name"))
+    if (sys.props("os.name") == "Mac OS X") Seq("-XstartOnFirstThread", "-d64") else Seq()
+}
+
+javacOptions in compile ++= Seq("-encoding", "UTF-8")
+
+fork in run := true
